@@ -388,6 +388,7 @@
   },
   "overrides": {
     "uuid": "$uuid",
+    "brace-expansion": "^5.0.8",
     "@great-expectations/jsonforms-antd-renderers": {
       "antd": "$antd"
     },
