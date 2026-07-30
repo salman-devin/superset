@@ -2,3 +2,5 @@ docker/**/*.sh text eol=lf
 *.svg binary
 *.ipynb binary
 *.geojson binary
+
+.github/workflows/*.lock.yml linguist-generated=true merge=ours
