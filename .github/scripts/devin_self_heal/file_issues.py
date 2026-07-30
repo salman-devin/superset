@@ -194,6 +194,23 @@ def known_fingerprints(issues: list[dict[str, Any]]) -> set[str]:
     return seen
 
 
+def open_clients(
+    *, repo: str, dry_run: bool
+) -> tuple[GitHubClient | None, GitHubClient | None]:
+    """Return the writer and the reader client for this run.
+
+    A dry run has no writer, but still reads when a token is available so its
+    output shows what would actually be filed rather than every finding.
+    """
+    if not dry_run:
+        writer = GitHubClient(os.environ["GITHUB_TOKEN"], repo)
+        writer.ensure_labels(LABELS)
+        return writer, writer
+    if os.environ.get("GITHUB_TOKEN") and repo:
+        return None, GitHubClient(os.environ["GITHUB_TOKEN"], repo)
+    return None, None
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser()
@@ -226,12 +243,10 @@ def main() -> int:
         Path(args.out).write_text("[]", encoding="utf-8")
         return 0
 
-    client = None
+    client, reader = open_clients(repo=args.repo, dry_run=args.dry_run)
     seen: set[str] = set()
-    if not args.dry_run:
-        client = GitHubClient(os.environ["GITHUB_TOKEN"], args.repo)
-        client.ensure_labels(LABELS)
-        seen = known_fingerprints(client.list_issues(labels=["automated-scan"]))
+    if reader is not None:
+        seen = known_fingerprints(reader.list_issues(labels=["automated-scan"]))
         logger.info("%d fingerprint(s) already tracked", len(seen))
 
     labels = ["maintenance", "automated-scan"]
