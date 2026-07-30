@@ -55,6 +55,7 @@ safe-outputs:
           type: string
       env:
         DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
+        DEVIN_ORG_ID: ${{ vars.DEVIN_ORG_ID }}
         DEVIN_MAX_ACU: "20"
         DEVIN_SESSION_TIMEOUT: "4200"
       output: "Devin remediation session finished; the outcome was posted on the issue."

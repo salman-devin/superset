@@ -32,8 +32,8 @@ devin-maintenance-scan.md               devin-remediate.md
  └─ safe-output: create-issue                     │
              (labels: devin-remediate)            ▼
                                           safe-output job
-                                           ├─ POST /v1/sessions  (Devin API)
-                                           ├─ poll GET /v1/session/{id}
+                                           ├─ POST /v3/organizations/{org}/sessions
+                                           ├─ poll GET  …/sessions/{id}
                                            └─ gh issue comment: session URL,
                                               status, outcome, PR links
 ```
@@ -67,7 +67,9 @@ devin-maintenance-scan.md               devin-remediate.md
 ## Setup
 
 1. Repository secret `DEVIN_API_KEY` — a Devin service-user API key (`cog_…`) with
-   permission to create sessions.
+   permission to create sessions, and repository variable `DEVIN_ORG_ID`
+   (`org-…`). The client uses the v3 organization-scoped endpoints; v1 keys
+   without an org scope return `403 Unauthorized`.
 2. Repository labels `maintenance`, `automated-scan`, `devin-remediate`.
 3. An engine credential for the gh-aw agent job (Copilot by default; see
    [Quick Start](https://github.github.com/gh-aw/setup/quick-start/)).

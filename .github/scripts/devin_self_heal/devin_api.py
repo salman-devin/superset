@@ -14,8 +14,9 @@
 # limitations under the License.
 """Minimal client for the Devin API (https://docs.devin.ai/api-reference).
 
-Only the endpoints needed by the self-healing automation are implemented.
-Uses the standard library so the workflow needs no pip install step.
+Only the v3 organization-scoped endpoints needed by the self-healing automation
+are implemented. Uses the standard library so the workflow needs no pip install
+step.
 """
 
 from __future__ import annotations
@@ -44,13 +45,17 @@ class DevinClient:
     def __init__(
         self,
         api_key: str,
+        org_id: str,
         base_url: str = DEFAULT_BASE_URL,
         timeout: int = 60,
         max_retries: int = 4,
     ) -> None:
         if not api_key:
             raise ValueError("A Devin API key is required")
+        if not org_id:
+            raise ValueError("A Devin organization id is required")
         self.api_key = api_key
+        self.sessions_path = f"/v3/organizations/{org_id}/sessions"
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
@@ -107,14 +112,14 @@ class DevinClient:
             payload["structured_output_schema"] = structured_output_schema
         if playbook_id:
             payload["playbook_id"] = playbook_id
-        return self._request("POST", "/v1/sessions", payload)
+        return self._request("POST", self.sessions_path, payload)
 
     def get_session(self, session_id: str) -> dict[str, Any]:
-        return self._request("GET", f"/v1/session/{session_id}")
+        return self._request("GET", f"{self.sessions_path}/{session_id}")
 
     def send_message(self, session_id: str, message: str) -> dict[str, Any]:
         return self._request(
-            "POST", f"/v1/session/{session_id}/message", {"message": message}
+            "POST", f"{self.sessions_path}/{session_id}/messages", {"message": message}
         )
 
     def wait_for_session(

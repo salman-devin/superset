@@ -187,7 +187,7 @@ def main() -> int:
 
     client = None
     if not args.dry_run:
-        client = DevinClient(os.environ["DEVIN_API_KEY"])
+        client = DevinClient(os.environ["DEVIN_API_KEY"], os.environ["DEVIN_ORG_ID"])
 
     for item in items:
         issue_number = item["issue_number"]
@@ -208,7 +208,9 @@ def main() -> int:
             structured_output_schema=STRUCTURED_OUTPUT_SCHEMA,
         )
         session_id = created["session_id"]
-        session_url = created.get("url", f"https://app.devin.ai/sessions/{session_id}")
+        session_url = (
+            created.get("url") or f"https://app.devin.ai/sessions/{session_id}"
+        )
         logger.info("Issue #%s -> %s", issue_number, session_url)
 
         (out_dir / f"{issue_number}.session").write_text(
