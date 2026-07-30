@@ -1,0 +1,58 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+# Self-healing maintenance loop without gh-aw. Run from the repository root:
+#
+#   docker compose -f .github/scripts/devin_self_heal/docker-compose.yml run --rm self-heal
+#
+# Each service is one stage of the same image, so a scheduler (cron, Nomad,
+# Kubernetes CronJob) can call whichever stage it owns.
+x-self-heal: &self-heal
+  build: .
+  working_dir: /repo
+  volumes:
+    - ../../..:/repo
+  environment:
+    GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:?set GITHUB_REPOSITORY=owner/name}
+    GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    DEVIN_API_KEY: ${DEVIN_API_KEY:-}
+    DEVIN_ORG_ID: ${DEVIN_ORG_ID:-}
+    DEVIN_MAX_ACU: ${DEVIN_MAX_ACU:-20}
+    DEVIN_SESSION_TIMEOUT: ${DEVIN_SESSION_TIMEOUT:-4200}
+    SELF_HEAL_MAX_ISSUES: ${SELF_HEAL_MAX_ISSUES:-5}
+    SELF_HEAL_QUEUE_LABEL: ${SELF_HEAL_QUEUE_LABEL:-devin-remediate}
+
+services:
+  # Everything: scan, file deduplicated issues, remediate the queue.
+  self-heal:
+    <<: *self-heal
+    command: ["all"]
+
+  # Scan only; writes findings.json / findings.md, needs no credentials.
+  scan:
+    <<: *self-heal
+    command: ["scan"]
+
+  # File issues from an existing scan result.
+  file-issues:
+    <<: *self-heal
+    command: ["file-issues"]
+
+  # Remediate the queue (override with `run --rm remediate remediate --issue 2`).
+  remediate:
+    <<: *self-heal
+    command: ["remediate", "--from-label", "devin-remediate"]
