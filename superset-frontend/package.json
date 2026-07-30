@@ -400,6 +400,7 @@
     "underscore": "^1.13.7",
     "jspdf": "^4.2.0",
     "nwsapi": "^2.2.13",
+    "shell-quote": "^1.8.5",
     "@deck.gl/aggregation-layers": "~9.2.5",
     "@deck.gl/core": "~9.2.5",
     "@deck.gl/extensions": "~9.2.5",
