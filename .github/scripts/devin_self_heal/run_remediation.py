@@ -14,13 +14,20 @@
 # limitations under the License.
 """Drive Devin sessions that remediate maintenance issues.
 
-Invoked from the ``start-devin-remediation`` safe-output job of the
-``devin-remediate`` agentic workflow. It reads the agent's structured output
-(``$GH_AW_AGENT_OUTPUT``), starts one Devin session per requested issue, polls
-the session to completion and writes an observable status report:
+Two interchangeable sources of work:
+
+* ``--agent-output`` / ``$GH_AW_AGENT_OUTPUT``: the structured output of the
+  ``start-devin-remediation`` safe-output job of the ``devin-remediate``
+  agentic workflow.
+* ``--issue`` / ``--from-label``: GitHub issues read directly through the REST
+  API, which is how the runner image drives remediation without gh-aw.
+
+Either way it starts one Devin session per issue, polls it to completion and
+writes an observable status report:
 
 * a markdown report on stdout / ``$GITHUB_STEP_SUMMARY``
-* ``devin-status.md`` files that the calling job posts as issue comments
+* ``<issue>.md`` files that the calling job posts as issue comments, or the
+  comment posted directly when a GitHub token is available
 """
 
 from __future__ import annotations
@@ -36,10 +43,13 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from devin_api import DevinClient  # noqa: E402
+from github_api import GitHubClient  # noqa: E402
 
 logger = logging.getLogger("devin-self-heal")
 
 TOOL_NAME = "start_devin_remediation"
+PLAN_HEADING = "## Remediation plan"
+AUTO_REMEDIABLE_PREFIX = "Auto-remediable:"
 
 # Devin returns this so the workflow can render a deterministic status table
 # instead of parsing free-form session text.
@@ -68,7 +78,7 @@ Issue URL: {issue_url}
 {issue_body}
 --- End issue body ---
 
-Remediation plan produced by the triage agent:
+Remediation plan:
 {plan}
 
 Requirements:
@@ -95,6 +105,63 @@ def read_agent_items(path: str) -> list[dict[str, Any]]:
         payload = json.load(handle)
     items = payload.get("items", []) if isinstance(payload, dict) else []
     return [item for item in items if item.get("type") == TOOL_NAME]
+
+
+def extract_plan(body: str) -> str:
+    """Pull the remediation plan section out of an issue body.
+
+    The scan renders the plan into the issue, so the driver needs no agent to
+    decide what Devin should do.
+    """
+    if PLAN_HEADING not in body:
+        return ""
+    section = body.split(PLAN_HEADING, 1)[1]
+    lines: list[str] = []
+    for line in section.splitlines():
+        if line.startswith("## ") or line.startswith("---"):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def is_auto_remediable(body: str) -> bool:
+    for line in body.splitlines():
+        if line.strip().startswith(AUTO_REMEDIABLE_PREFIX):
+            return line.split(":", 1)[1].strip().lower() != "no"
+    return True
+
+
+def read_issue_items(
+    client: GitHubClient,
+    *,
+    numbers: list[int],
+    label: str = "",
+    force: bool = False,
+) -> list[dict[str, Any]]:
+    """Build remediation requests straight from GitHub issues."""
+    issues: list[dict[str, Any]] = [client.get_issue(number) for number in numbers]
+    if label:
+        issues += [
+            issue
+            for issue in client.list_issues(labels=[label], state="open")
+            if issue["number"] not in numbers
+        ]
+
+    items: list[dict[str, Any]] = []
+    for issue in issues:
+        body = issue.get("body") or ""
+        if not force and not is_auto_remediable(body):
+            logger.info("Skipping #%s: marked Auto-remediable: no", issue["number"])
+            continue
+        items.append(
+            {
+                "issue_number": issue["number"],
+                "issue_title": issue.get("title", ""),
+                "issue_body": body,
+                "plan": extract_plan(body),
+            }
+        )
+    return items
 
 
 def build_prompt(item: dict[str, Any], repo: str) -> str:
@@ -150,17 +217,53 @@ def render_comment(
             "",
         ]
     lines.append(
-        "<sub>Filed automatically by the `devin-remediate` agentic workflow.</sub>"
+        "<sub>Filed automatically by the self-healing maintenance automation.</sub>"
     )
     return "\n".join(lines)
 
 
-def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+def resolve_work(
+    args: argparse.Namespace,
+) -> tuple[GitHubClient | None, list[dict[str, Any]]]:
+    """Return the GitHub client, if any, and the issues to remediate."""
+    if not (args.issue or args.from_label):
+        return None, read_agent_items(args.agent_output)
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise SystemExit("--issue/--from-label need GITHUB_TOKEN to read the issues")
+    github = GitHubClient(token, args.repo)
+    return github, read_issue_items(
+        github, numbers=args.issue, label=args.from_label, force=args.force
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--agent-output", default=os.environ.get("GH_AW_AGENT_OUTPUT"))
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--out-dir", default="devin-remediation")
+    parser.add_argument(
+        "--issue",
+        type=int,
+        action="append",
+        default=[],
+        help="Remediate this issue number; repeatable.",
+    )
+    parser.add_argument(
+        "--from-label",
+        default="",
+        help="Remediate every open issue carrying this label.",
+    )
+    parser.add_argument(
+        "--queue-label",
+        default=os.environ.get("SELF_HEAL_QUEUE_LABEL", "devin-remediate"),
+        help="Label removed once an issue has been handed to a session.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Remediate even when the issue is marked Auto-remediable: no.",
+    )
     parser.add_argument(
         "--timeout-seconds",
         type=int,
@@ -175,11 +278,16 @@ def main() -> int:
         default=int(os.environ.get("DEVIN_MAX_ACU", "20")),
     )
     parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
+    return parser
 
-    items = read_agent_items(args.agent_output)
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    args = build_parser().parse_args()
+
+    github, items = resolve_work(args)
     if not items:
-        logger.info("No %s requests in agent output; nothing to do.", TOOL_NAME)
+        logger.info("Nothing to remediate.")
         return 0
 
     out_dir = Path(args.out_dir)
@@ -227,6 +335,12 @@ def main() -> int:
         )
         comment = render_comment(item, session, session_url)
         (out_dir / f"{issue_number}.md").write_text(comment, encoding="utf-8")
+
+        if github is not None:
+            github.create_comment(issue_number, comment)
+            # Drop the queue label so the issue is not picked up twice.
+            if queue_label := args.from_label or args.queue_label:
+                github.remove_label(issue_number, queue_label)
 
         if summary_path := os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(summary_path, "a", encoding="utf-8") as handle:

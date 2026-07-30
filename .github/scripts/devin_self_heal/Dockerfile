@@ -16,14 +16,15 @@
 # under the License.
 #
 # Runner image for the self-healing maintenance automation. It packages the
-# scanner (pip-audit / npm audit) and the Devin session driver so the same code
-# GitHub Actions executes can be run locally or from any other scheduler.
+# scanner (pip-audit / npm audit), the issue filer and the Devin session driver,
+# so the full scan -> issue -> remediation loop runs from any scheduler with no
+# gh-aw and no agent engine.
 #
 #   docker build -t devin-self-heal .github/scripts/devin_self_heal
-#   docker run --rm -e DEVIN_API_KEY -e DEVIN_ORG_ID \
-#     -e GITHUB_REPOSITORY=owner/name -v "$PWD:/repo" devin-self-heal scan
+#   docker run --rm -e DEVIN_API_KEY -e DEVIN_ORG_ID -e GITHUB_TOKEN \
+#     -e GITHUB_REPOSITORY=owner/name -v "$PWD:/repo" devin-self-heal all
 #
-# The Devin credential is only ever passed in at runtime; nothing is baked in.
+# Credentials are only ever passed in at runtime; nothing is baked in.
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -32,10 +33,10 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends nodejs npm \
  && rm -rf /var/lib/apt/lists/* \
- && pip install --no-cache-dir pip-audit==2.9.0
+ && pip install --no-cache-dir pip-audit==2.10.1
 
 WORKDIR /repo
 COPY . /opt/devin_self_heal/
 
 ENTRYPOINT ["/opt/devin_self_heal/entrypoint.sh"]
-CMD ["scan"]
+CMD ["all"]

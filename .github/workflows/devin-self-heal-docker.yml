@@ -1,0 +1,100 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+# Container-based twin of the devin-maintenance-scan / devin-remediate agentic
+# workflows: same scan, same issues, same Devin sessions, but every step is
+# deterministic code in the runner image, so it needs no gh-aw compilation and
+# no agent engine credential.
+name: Devin self-heal (container)
+
+on:
+  schedule:
+    # Weekdays, offset from the agentic scan so the two never race for issues.
+    - cron: "30 6 * * 1-5"
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Which stage to run
+        type: choice
+        default: all
+        options: [all, scan, file-issues, remediate]
+      issue_number:
+        description: Remediate only this issue (remediate stage)
+        type: string
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: devin-self-heal-container
+  cancel-in-progress: false
+
+jobs:
+  self-heal:
+    # Only the remediation label is actionable on an issue event.
+    if: >-
+      github.event_name != 'issues' ||
+      github.event.label.name == 'devin-remediate'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build runner image
+        run: docker build -t devin-self-heal .github/scripts/devin_self_heal
+
+      - name: Run self-healing stage
+        env:
+          # A PAT (classic `repo`, or fine-grained with Issues: read and write)
+          # so issues and labels this run creates are able to trigger other
+          # workflows; GITHUB_TOKEN-authored events cannot.
+          SELF_HEAL_GITHUB_TOKEN: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
+          DEVIN_ORG_ID: ${{ vars.DEVIN_ORG_ID }}
+          STAGE: ${{ github.event_name == 'issues' && 'remediate' || inputs.stage || 'all' }}
+          ISSUE_NUMBER: ${{ github.event_name == 'issues' && github.event.issue.number || inputs.issue_number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          args=("$STAGE")
+          if [ "$STAGE" = "remediate" ]; then
+            if [ -n "$ISSUE_NUMBER" ]; then
+              args+=(--issue "$ISSUE_NUMBER")
+            else
+              args+=(--from-label devin-remediate)
+            fi
+          fi
+          docker run --rm \
+            -e GITHUB_TOKEN="$SELF_HEAL_GITHUB_TOKEN" \
+            -e GITHUB_REPOSITORY="$REPOSITORY" \
+            -e DEVIN_API_KEY \
+            -e DEVIN_ORG_ID \
+            -e DEVIN_MAX_ACU \
+            -e DEVIN_SESSION_TIMEOUT \
+            -e GITHUB_STEP_SUMMARY=/repo/step-summary.md \
+            -v "$PWD:/repo" \
+            devin-self-heal "${args[@]}"
+          if [ -f step-summary.md ]; then
+            cat step-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
