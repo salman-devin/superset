@@ -59,7 +59,7 @@ PYTHON_PLAN = """1. Regenerate the requirements lockfiles with
 5. Verify with `pip-audit -r requirements/base.txt` that {advisory} is gone.
 6. Open a PR against the default branch closing this issue."""
 
-NPM_PLAN = """1. In `superset-frontend`, upgrade `{package}` out of the vulnerable range
+NPM_PLAN = """1. In `{workspace}`, upgrade `{package}` out of the vulnerable range
    ({vulnerable_range}), preferring the smallest change that clears the advisory:
    bump the direct dependency in `package.json` when `{package}` is one, otherwise
    update the transitive pin (e.g. `npm update {package}` or an `overrides` entry).
@@ -127,14 +127,15 @@ pip-audit -r requirements/base.txt
 
 def npm_issue(finding: dict[str, Any]) -> tuple[str, str]:
     package = finding["package"]
+    workspace = finding.get("workspace", "superset-frontend")
     dependents = ", ".join(f"`{name}`" for name in finding.get("dependents", []))
     title = (
-        f"[Security] {package} is vulnerable in superset-frontend: "
+        f"[Security] {package} is vulnerable in {workspace}: "
         f"{finding.get('title') or finding['fingerprint']}"
     )
     body = f"""## Summary
 
-`{package}` in `superset-frontend/package-lock.json` is affected by
+`{package}` in `{workspace}/package-lock.json` is affected by
 {finding.get("title") or "an npm advisory"}.
 
 ## Details
@@ -142,6 +143,7 @@ def npm_issue(finding: dict[str, Any]) -> tuple[str, str]:
 | Field | Value |
 | --- | --- |
 | Package | `{package}` |
+| Workspace | `{workspace}` |
 | Vulnerable range | `{finding.get("vulnerable_range") or "unknown"}` |
 | Severity | `{finding.get("severity", "moderate")}` |
 | Advisory | {finding.get("advisory") or "n/a"} |
@@ -151,6 +153,7 @@ def npm_issue(finding: dict[str, Any]) -> tuple[str, str]:
 
 {
         NPM_PLAN.format(
+            workspace=workspace,
             package=package,
             vulnerable_range=finding.get("vulnerable_range") or "unknown",
             dependents=dependents or "the packages importing it",
@@ -160,7 +163,7 @@ def npm_issue(finding: dict[str, Any]) -> tuple[str, str]:
 ## Verification
 
 ```
-cd superset-frontend && npm audit --json
+cd {workspace} && npm audit --json
 ```
 """
     return title, body

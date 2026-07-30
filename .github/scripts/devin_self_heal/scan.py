@@ -31,6 +31,27 @@ from typing import Any, Iterable
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "moderate": 2, "low": 3, "info": 4}
 
+# npm workspaces (relative to the repo root) that ship their own lockfile.
+NPM_WORKSPACES = (
+    "superset-frontend",
+    "superset-websocket",
+    "superset-embedded-sdk",
+    "superset-frontend/cypress-base",
+)
+
+
+def npm_fingerprint(workspace: str, name: str, source: Any) -> str:
+    """Build the npm dedup fingerprint for a finding.
+
+    ``superset-frontend`` keeps the historical ``npm:{package}:{source}`` form so
+    issues already filed against it are not refiled under a new key. Every other
+    workspace carries its path so the same package vulnerable in two workspaces
+    stays two distinct findings instead of collapsing into one.
+    """
+    if workspace == "superset-frontend":
+        return f"npm:{name}:{source}"
+    return f"npm:{workspace}:{name}:{source}"
+
 
 def _run(cmd: list[str], cwd: Path | None = None) -> tuple[int, str]:
     """Run a scanner and return its exit code and stdout.
@@ -97,11 +118,26 @@ def scan_python(requirements: Path) -> list[dict[str, Any]]:
     return findings
 
 
-def scan_npm(frontend: Path) -> list[dict[str, Any]]:
-    """Run npm audit and collapse transitive chains onto their root package."""
-    if not (frontend / "package-lock.json").exists():
+def scan_npm(
+    root: Path, workspaces: Iterable[str] = NPM_WORKSPACES
+) -> list[dict[str, Any]]:
+    """Run npm audit across every workspace that ships a lockfile."""
+    findings: list[dict[str, Any]] = []
+    for workspace in workspaces:
+        findings.extend(scan_npm_workspace(root, workspace))
+    return findings
+
+
+def scan_npm_workspace(root: Path, workspace: str) -> list[dict[str, Any]]:
+    """Run npm audit in one workspace and collapse transitive chains.
+
+    Each transitive advisory is folded onto its root package so a single issue
+    is filed per vulnerable root instead of one per dependent.
+    """
+    directory = root / workspace
+    if not (directory / "package-lock.json").exists():
         return []
-    code, stdout = _run(["npm", "audit", "--json"], cwd=frontend)
+    code, stdout = _run(["npm", "audit", "--json"], cwd=directory)
     try:
         report = json.loads(stdout)
     except json.JSONDecodeError:
@@ -116,12 +152,16 @@ def scan_npm(frontend: Path) -> list[dict[str, Any]]:
             if isinstance(via, str):
                 dependents[via].add(name)
                 continue
-            root = roots.setdefault(
-                via.get("name", name),
+            package = via.get("name", name)
+            root_finding = roots.setdefault(
+                package,
                 {
                     "kind": "npm-dependency",
-                    "fingerprint": f"npm:{via.get('name', name)}:{via.get('source')}",
-                    "package": via.get("name", name),
+                    "fingerprint": npm_fingerprint(
+                        workspace, package, via.get("source")
+                    ),
+                    "workspace": workspace,
+                    "package": package,
                     "advisory": via.get("url", ""),
                     "title": via.get("title", ""),
                     "severity": via.get("severity", entry.get("severity", "moderate")),
@@ -129,14 +169,14 @@ def scan_npm(frontend: Path) -> list[dict[str, Any]]:
                     "dependents": set(),
                 },
             )
-            root["dependents"].add(name)
+            root_finding["dependents"].add(name)
 
     findings = []
-    for root in roots.values():
-        root["dependents"] = sorted(
-            root["dependents"] | dependents.get(root["package"], set())
+    for root_finding in roots.values():
+        root_finding["dependents"] = sorted(
+            root_finding["dependents"] | dependents.get(root_finding["package"], set())
         )[:20]
-        findings.append(root)
+        findings.append(root_finding)
     return findings
 
 
@@ -175,9 +215,7 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.repo_root).resolve()
-    findings = scan_python(root / "requirements" / "base.txt") + scan_npm(
-        root / "superset-frontend"
-    )
+    findings = scan_python(root / "requirements" / "base.txt") + scan_npm(root)
     deduplicated: dict[str, dict[str, Any]] = {}
     for finding in findings:
         deduplicated.setdefault(finding["fingerprint"], finding)
