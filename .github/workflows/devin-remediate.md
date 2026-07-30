@@ -60,7 +60,7 @@ safe-outputs:
         DEVIN_SESSION_TIMEOUT: "4200"
       output: "Devin remediation session finished; the outcome was posted on the issue."
       steps:
-        - uses: actions/checkout@v5
+        - uses: actions/checkout@v7
         - uses: actions/setup-python@v7
           with:
             python-version: "3.11"
