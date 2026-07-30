@@ -391,6 +391,9 @@
     "@great-expectations/jsonforms-antd-renderers": {
       "antd": "$antd"
     },
+    "brace-expansion@1": "^1.1.18",
+    "brace-expansion@2": "^2.1.4",
+    "brace-expansion@5": "^5.0.8",
     "core-js": "^3.38.1",
     "dompurify": "^3.4.11",
     "esbuild": "^0.28.1",
