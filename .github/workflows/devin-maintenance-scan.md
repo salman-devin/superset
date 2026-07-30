@@ -30,6 +30,11 @@ safe-outputs:
   create-issue:
     max: 5
     labels: [maintenance, automated-scan, devin-remediate]
+    # A label applied with the default GITHUB_TOKEN cannot trigger another
+    # workflow, so `devin-remediate` would never reach `devin-remediate.md`.
+    # SELF_HEAL_PAT (fine-grained, issues: write) makes the chain work; without
+    # it the label is still applied, it just has to be re-applied by a human.
+    github-token: ${{ secrets.SELF_HEAL_PAT || secrets.GITHUB_TOKEN }}
 ---
 
 # Devin maintenance scan
@@ -43,9 +48,16 @@ stable `fingerprint`).
 
 1. Read `findings.json`.
 2. List the maintenance issues already tracked so you never file a duplicate:
-   `gh issue list --state all --label automated-scan --limit 200 --json number,title,body,state`.
-   A finding is a duplicate when its `fingerprint` appears in an existing issue
-   body, regardless of that issue's state.
+   `gh issue list --state all --limit 300 --json number,title,body,state`.
+   Regardless of the existing issue's state, a finding is a duplicate when **any**
+   of these already appears in an issue title or body:
+   - its `fingerprint`;
+   - its advisory identifier (`PYSEC-…`, `GHSA-…`, or any of its `aliases`);
+   - the affected package name together with the same upgrade
+     (for example an open issue titled "Upgrade Flask 2.3.3 → 3.1.3" already
+     covers `py:flask:PYSEC-2026-2151`).
+   Issues filed by hand predate the fingerprint convention, so never rely on the
+   fingerprint alone.
 3. Rank the remaining findings by severity, then by whether a fix version exists.
    File at most the top 5 with `create-issue`, one issue per finding.
 4. Each issue body must contain, in this order:
@@ -70,5 +82,7 @@ the body that a human must triage it.
 ## Safe outputs
 
 - Use `create-issue` for new findings only.
+- Never pass a `labels` field to `create-issue`. Labels come from the workflow
+  configuration; supplying your own creates malformed literal labels.
 - Call `noop` with a one-line explanation when every finding is already tracked or
   the scan produced nothing.
