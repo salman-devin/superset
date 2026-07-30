@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -32,7 +33,14 @@ SEVERITY_ORDER = {"critical": 0, "high": 1, "moderate": 2, "low": 3, "info": 4}
 
 
 def _run(cmd: list[str], cwd: Path | None = None) -> tuple[int, str]:
+    """Run a scanner and return its exit code and stdout.
+
+    Scanner stderr is surfaced on the job log so a failed scan is diagnosable
+    instead of silently parsing as "no findings".
+    """
     process = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+    if process.stderr.strip():
+        print(f"[{cmd[0]}] {process.stderr.strip()}", file=sys.stderr)
     return process.returncode, process.stdout
 
 
@@ -51,7 +59,7 @@ def scan_python(requirements: Path) -> list[dict[str, Any]]:
         ),
         encoding="utf-8",
     )
-    _, stdout = _run(
+    code, stdout = _run(
         [
             "pip-audit",
             "-r",
@@ -65,6 +73,7 @@ def scan_python(requirements: Path) -> list[dict[str, Any]]:
     try:
         report = json.loads(stdout)
     except json.JSONDecodeError:
+        print(f"pip-audit produced no parsable JSON (exit {code})", file=sys.stderr)
         return []
 
     findings = []
@@ -92,10 +101,11 @@ def scan_npm(frontend: Path) -> list[dict[str, Any]]:
     """Run npm audit and collapse transitive chains onto their root package."""
     if not (frontend / "package-lock.json").exists():
         return []
-    _, stdout = _run(["npm", "audit", "--json"], cwd=frontend)
+    code, stdout = _run(["npm", "audit", "--json"], cwd=frontend)
     try:
         report = json.loads(stdout)
     except json.JSONDecodeError:
+        print(f"npm audit produced no parsable JSON (exit {code})", file=sys.stderr)
         return []
 
     roots: dict[str, dict[str, Any]] = {}
