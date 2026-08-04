@@ -435,6 +435,9 @@
     },
     "lerna": {
       "js-yaml": "^4.3.0"
+    },
+    "minimatch@3": {
+      "brace-expansion": "^1.1.17"
     }
   },
   "readme": "ERROR: No README data found!",
