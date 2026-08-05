@@ -395,6 +395,7 @@
     "dompurify": "^3.4.11",
     "esbuild": "^0.28.1",
     "http-proxy-middleware": "^2.0.10",
+    "ip-address": "~10.3.1",
     "tar": "^7.5.16",
     "puppeteer": "^22.4.1",
     "underscore": "^1.13.7",
