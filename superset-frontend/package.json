@@ -416,6 +416,7 @@
     "@luma.gl/webgl": "~9.2.5",
     "fast-xml-parser": "^5.8.0",
     "fast-uri": "^3.1.4",
+    "ip-address": "~10.3.1",
     "jest-mock": "^30.4.0",
     "jest-runtime": "^30.4.0",
     "@jest/globals": "^30.4.0",
