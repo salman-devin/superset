@@ -434,7 +434,13 @@
       "eslint": "$eslint"
     },
     "lerna": {
-      "js-yaml": "^4.3.0"
+      "js-yaml": "^4.3.1"
+    },
+    "@yarnpkg/parsers": {
+      "js-yaml": "^4.3.1"
+    },
+    "front-matter": {
+      "js-yaml": "^4.3.1"
     }
   },
   "readme": "ERROR: No README data found!",
